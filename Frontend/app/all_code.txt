@@ -1,0 +1,802 @@
+﻿===== FRONTEND SOURCE CODE =====
+
+===== FILE: C:\Users\Lenovo\Downloads\springboot project\Backend\Frontend\app\src\api.js =====
+const BASE_URL = 'http://localhost:8080/api';
+
+const request = async (endpoint, options = {}) => {
+    const token = localStorage.getItem('token');
+    const headers = {
+        'Content-Type': 'application/json',
+        ...(token ? {Authorization: `Bearer ${token}`} : {}),
+        ...options.headers,
+    };
+
+    const response = await fetch(`${BASE_URL}${endpoint}`, {
+        ...options,
+        headers,
+    });
+
+    if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem('token');
+        window.location.reload();
+        throw new Error('Session expired. Please log in again.');
+    }
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+        const errorMsg = data?.message || data?.error || 'Server error';
+        throw new Error(errorMsg);
+    }
+
+    return data;
+};
+
+export const api = {
+    // Auth
+    login: (credentials) =>
+        request('/auth/login', {method: 'POST', body: JSON.stringify(credentials)}),
+    register: (payload) =>
+        request('/users/register', {method: 'POST', body: JSON.stringify(payload)}),
+
+    // Dashboard & Profile
+    getDashboard: () => request('/dashboard'),
+    getProfile: () => request('/users/me'),
+
+    // Interviews
+    getMyInterviews: () => request('/interviews/my'),
+    createInterview: (payload) =>
+        request('/interviews', {method: 'POST', body: JSON.stringify(payload)}),
+
+    // AI Questions & Answering
+    getQuestions: (interviewId) =>
+        request(`/interviews/${interviewId}/questions`),
+    generateAiQuestions: (interviewId, count = 5) =>
+        request(`/interviews/${interviewId}/questions/generate`, {
+            method: 'POST',
+            body: JSON.stringify({questionCount: count}),
+        }),
+    submitAnswer: (interviewId, questionId, answerText) =>
+        request(`/interviews/${interviewId}/questions/${questionId}/answer`, {
+            method: 'POST',
+            body: JSON.stringify({answerText}),
+        }),
+    getReport: (interviewId) =>
+        request(`/interviews/${interviewId}/report`),
+};
+
+===== FILE: C:\Users\Lenovo\Downloads\springboot project\Backend\Frontend\app\src\App.jsx =====
+import React, {useState, useEffect} from 'react';
+import {api} from './api';
+import {
+    Bot, LogOut, PlusCircle, Sparkles, CheckCircle2,
+    Send, Award, AlertCircle, ArrowRight, Loader2, BookOpen
+} from 'lucide-react';
+
+export default function App() {
+    const [token, setToken] = useState(localStorage.getItem('token'));
+    const [view, setView] = useState('dashboard');
+    const [activeInterview, setActiveInterview] = useState(null);
+
+    const handleLogin = (authData) => {
+        localStorage.setItem('token', authData.token);
+        setToken(authData.token);
+        setView('dashboard');
+    };
+
+    const handleLogout = () => {
+        localStorage.removeItem('token');
+        setToken(null);
+        setActiveInterview(null);
+    };
+
+    if (!token) {
+        return <AuthScreen onLoginSuccess={handleLogin}/>;
+    }
+
+    return (
+        <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans">
+            <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+                <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+                    <div
+                        onClick={() => {
+                            setActiveInterview(null);
+                            setView('dashboard');
+                        }}
+                        className="flex items-center gap-2 cursor-pointer font-bold text-lg text-indigo-600 tracking-tight"
+                    >
+                        <Bot className="w-6 h-6"/>
+                        <span>InterviewAI</span>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={() => {
+                                setActiveInterview(null);
+                                setView('dashboard');
+                            }}
+                            className="text-sm font-medium text-slate-600 hover:text-slate-900 transition"
+                        >
+                            Dashboard
+                        </button>
+                        <button
+                            onClick={handleLogout}
+                            className="flex items-center gap-1.5 text-sm font-medium text-rose-600 hover:bg-rose-50 px-3 py-1.5 rounded-lg transition"
+                        >
+                            <LogOut className="w-4 h-4"/>
+                            <span>Logout</span>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-6">
+                {view === 'dashboard' && (
+                    <DashboardView
+                        onOpenInterview={(item) => {
+                            setActiveInterview(item);
+                            setView('interview');
+                        }}
+                    />
+                )}
+                {view === 'interview' && activeInterview && (
+                    <InterviewSessionView
+                        interview={activeInterview}
+                        onViewReport={() => setView('report')}
+                    />
+                )}
+                {view === 'report' && activeInterview && (
+                    <ReportView
+                        interview={activeInterview}
+                        onBack={() => setView('dashboard')}
+                    />
+                )}
+            </main>
+        </div>
+    );
+}
+
+function AuthScreen({onLoginSuccess}) {
+    const [isRegister, setIsRegister] = useState(false);
+    const [formData, setFormData] = useState({name: '', email: '', password: ''});
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setLoading(true);
+
+        try {
+            if (isRegister) {
+                await api.register(formData);
+                const res = await api.login({email: formData.email, password: formData.password});
+                onLoginSuccess(res);
+            } else {
+                const res = await api.login({email: formData.email, password: formData.password});
+                onLoginSuccess(res);
+            }
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div
+            className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-slate-100 flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-100 p-8">
+                <div className="flex flex-col items-center mb-6">
+                    <div
+                        className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center mb-3">
+                        <Bot className="w-7 h-7"/>
+                    </div>
+                    <h2 className="text-2xl font-bold text-slate-900">
+                        {isRegister ? 'Create Account' : 'Welcome Back'}
+                    </h2>
+                    <p className="text-sm text-slate-500 mt-1">
+                        {isRegister ? 'Start preparing with AI mock interviews' : 'Sign in to access your sessions'}
+                    </p>
+                </div>
+
+                {error && (
+                    <div
+                        className="mb-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0"/>
+                        <span>{error}</span>
+                    </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    {isRegister && (
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1">Full
+                                Name</label>
+                            <input
+                                type="text"
+                                required
+                                value={formData.name}
+                                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                                placeholder="John Doe"
+                            />
+                        </div>
+                    )}
+
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1">Email
+                            Address</label>
+                        <input
+                            type="email"
+                            required
+                            value={formData.email}
+                            onChange={(e) => setFormData({...formData, email: e.target.value})}
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                            placeholder="you@domain.com"
+                        />
+                    </div>
+
+                    <div>
+                        <label
+                            className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1">Password</label>
+                        <input
+                            type="password"
+                            required
+                            minLength={8}
+                            value={formData.password}
+                            onChange={(e) => setFormData({...formData, password: e.target.value})}
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                            placeholder="Min. 8 characters"
+                        />
+                    </div>
+
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full mt-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-lg text-sm transition flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                        {loading && <Loader2 className="w-4 h-4 animate-spin"/>}
+                        <span>{isRegister ? 'Register' : 'Sign In'}</span>
+                    </button>
+                </form>
+
+                <div className="mt-6 text-center text-xs text-slate-500">
+                    {isRegister ? 'Already registered?' : "Don't have an account?"}{' '}
+                    <button
+                        onClick={() => {
+                            setIsRegister(!isRegister);
+                            setError('');
+                        }}
+                        className="font-semibold text-indigo-600 hover:underline"
+                    >
+                        {isRegister ? 'Sign In' : 'Sign Up'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function DashboardView({onOpenInterview}) {
+    const [dashboard, setDashboard] = useState(null);
+    const [interviews, setInterviews] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [showModal, setShowModal] = useState(false);
+
+    const fetchData = async () => {
+        try {
+            const [dashData, interviewList] = await Promise.all([
+                api.getDashboard().catch(() => null),
+                api.getMyInterviews().catch(() => []),
+            ]);
+            setDashboard(dashData);
+            setInterviews(interviewList || []);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchData();
+    }, []);
+
+    if (loading) {
+        return (
+            <div className="flex justify-center items-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-600"/>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-6">
+            <div
+                className="bg-gradient-to-r from-indigo-600 to-indigo-800 text-white rounded-2xl p-6 md:p-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
+                <div>
+                    <h1 className="text-2xl font-bold">{dashboard?.welcomeMessage || 'Welcome!'}</h1>
+                    <p className="text-indigo-100 text-sm mt-1">Select an interview to prepare or create a new mock
+                        session.</p>
+                </div>
+                <button
+                    onClick={() => setShowModal(true)}
+                    className="bg-white text-indigo-700 hover:bg-indigo-50 px-4 py-2.5 rounded-xl font-medium text-sm flex items-center gap-2 shadow-sm transition shrink-0"
+                >
+                    <PlusCircle className="w-4 h-4"/>
+                    <span>New Interview</span>
+                </button>
+            </div>
+
+            <div>
+                <h2 className="text-lg font-bold text-slate-800 mb-4">Your Interview Sessions</h2>
+                {interviews.length === 0 ? (
+                    <div className="bg-white border border-dashed border-slate-300 rounded-xl p-8 text-center">
+                        <BookOpen className="w-10 h-10 text-slate-400 mx-auto mb-2"/>
+                        <h3 className="font-semibold text-slate-700 text-sm">No interviews yet</h3>
+                        <p className="text-xs text-slate-400 mt-1">Click "New Interview" to initiate your first AI
+                            evaluation.</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {interviews.map((item) => (
+                            <div
+                                key={item.id}
+                                className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md transition flex flex-col justify-between"
+                            >
+                                <div>
+                                    <div className="flex items-center justify-between mb-2">
+                    <span
+                        className="text-[11px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded bg-indigo-50 text-indigo-700">
+                      {item.topic || 'General'}
+                    </span>
+                                        <span className="text-xs text-slate-400">
+                      {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ''}
+                    </span>
+                                    </div>
+                                    <h3 className="font-semibold text-slate-900 line-clamp-1">{item.title}</h3>
+                                </div>
+
+                                <div className="mt-6 flex justify-end">
+                                    <button
+                                        onClick={() => onOpenInterview(item)}
+                                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition"
+                                    >
+                                        <span>Open Session</span>
+                                        <ArrowRight className="w-3.5 h-3.5"/>
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {showModal && (
+                <CreateInterviewModal
+                    onClose={() => setShowModal(false)}
+                    onCreated={() => {
+                        setShowModal(false);
+                        fetchData();
+                    }}
+                />
+            )}
+        </div>
+    );
+}
+
+function CreateInterviewModal({onClose, onCreated}) {
+    const [formData, setFormData] = useState({title: '', topic: '', jobDescription: ''});
+    const [submitting, setSubmitting] = useState(false);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setSubmitting(true);
+        try {
+            await api.createInterview(formData);
+            onCreated();
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-lg rounded-2xl shadow-xl p-6">
+                <h3 className="text-lg font-bold text-slate-900 mb-1">Create New Mock Interview</h3>
+                <p className="text-xs text-slate-500 mb-4">Set topic and context so AI can generate accurate
+                    questions.</p>
+
+                <form onSubmit={handleSubmit} className="space-y-3.5">
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Title *</label>
+                        <input
+                            type="text"
+                            required
+                            value={formData.title}
+                            onChange={(e) => setFormData({...formData, title: e.target.value})}
+                            placeholder="e.g. Senior Java Backend Developer"
+                            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Topic</label>
+                        <input
+                            type="text"
+                            value={formData.topic}
+                            onChange={(e) => setFormData({...formData, topic: e.target.value})}
+                            placeholder="e.g. Spring Boot, Microservices, Multithreading"
+                            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Job Description /
+                            Requirements</label>
+                        <textarea
+                            rows={3}
+                            value={formData.jobDescription}
+                            onChange={(e) => setFormData({...formData, jobDescription: e.target.value})}
+                            placeholder="Paste requirements, tech stack or key responsibilities..."
+                            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={submitting}
+                            className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center gap-1.5"
+                        >
+                            {submitting && <Loader2 className="w-4 h-4 animate-spin"/>}
+                            <span>Create Session</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}
+
+function InterviewSessionView({interview, onViewReport}) {
+    const [questions, setQuestions] = useState([]);
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [answerInput, setAnswerInput] = useState('');
+    const [evaluation, setEvaluation] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [generating, setGenerating] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+
+    const loadQuestions = async () => {
+        try {
+            const data = await api.getQuestions(interview.id);
+            setQuestions(data || []);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        loadQuestions();
+    }, [interview.id]);
+
+    const handleGenerateQuestions = async () => {
+        setGenerating(true);
+        try {
+            await api.generateAiQuestions(interview.id, 5);
+            await loadQuestions();
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            setGenerating(false);
+        }
+    };
+
+    const handleAnswerSubmit = async () => {
+        if (!answerInput.trim()) return;
+        setSubmitting(true);
+        setEvaluation(null);
+
+        const activeQuestion = questions[currentIndex];
+        try {
+            const result = await api.submitAnswer(interview.id, activeQuestion.id, answerInput);
+            setEvaluation(result);
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const nextQuestion = () => {
+        setEvaluation(null);
+        setAnswerInput('');
+        setCurrentIndex((prev) => prev + 1);
+    };
+
+    if (loading) {
+        return (
+            <div className="flex justify-center items-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-600"/>
+            </div>
+        );
+    }
+
+    if (questions.length === 0) {
+        return (
+            <div className="bg-white border border-slate-200 rounded-2xl p-8 max-w-xl mx-auto text-center mt-6">
+                <div
+                    className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-3">
+                    <Sparkles className="w-6 h-6"/>
+                </div>
+                <h2 className="text-xl font-bold text-slate-800">Generate Questions with AI</h2>
+                <p className="text-sm text-slate-500 mt-2 mb-6">
+                    AI will read the topic and job requirements to tailor dynamic interview questions for you.
+                </p>
+                <button
+                    onClick={handleGenerateQuestions}
+                    disabled={generating}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-5 py-2.5 rounded-xl text-sm transition inline-flex items-center gap-2 shadow-sm disabled:opacity-50"
+                >
+                    {generating ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>}
+                    <span>{generating ? 'Generating Questions...' : 'Generate 5 Questions'}</span>
+                </button>
+            </div>
+        );
+    }
+
+    const currentQ = questions[currentIndex];
+
+    return (
+        <div className="max-w-3xl mx-auto space-y-6">
+            <div className="bg-white p-4 rounded-xl border border-slate-200 flex items-center justify-between">
+                <div>
+                    <span className="text-xs text-slate-400 font-semibold uppercase">Topic: {interview.topic}</span>
+                    <h2 className="text-base font-bold text-slate-800">{interview.title}</h2>
+                </div>
+                <div className="flex items-center gap-3">
+          <span className="text-xs font-medium text-slate-500">
+            Question {currentIndex + 1} of {questions.length}
+          </span>
+                    <button
+                        onClick={onViewReport}
+                        className="text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition"
+                    >
+                        Finish & View Report
+                    </button>
+                </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-start gap-3">
+          <span className="bg-indigo-100 text-indigo-700 font-bold px-2.5 py-1 rounded text-xs">
+            Q{currentQ.questionOrder || currentIndex + 1}
+          </span>
+                    <p className="text-base font-semibold text-slate-900 leading-relaxed">
+                        {currentQ.questionText}
+                    </p>
+                </div>
+
+                <div className="mt-5">
+          <textarea
+              rows={5}
+              disabled={evaluation !== null}
+              value={answerInput}
+              onChange={(e) => setAnswerInput(e.target.value)}
+              placeholder="Type your structured answer here..."
+              className="w-full p-3.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none disabled:bg-slate-50"
+          />
+                </div>
+
+                {!evaluation && (
+                    <div className="mt-3 flex justify-end">
+                        <button
+                            onClick={handleAnswerSubmit}
+                            disabled={submitting || !answerInput.trim()}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-lg text-sm transition flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                            {submitting ? <Loader2 className="w-4 h-4 animate-spin"/> : <Send className="w-4 h-4"/>}
+                            <span>Submit & Evaluate</span>
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {evaluation && (
+                <div className="bg-white p-6 rounded-2xl border border-emerald-200 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                        <div className="flex items-center gap-2 text-emerald-700 font-bold">
+                            <CheckCircle2 className="w-5 h-5"/>
+                            <span>AI Evaluation Complete</span>
+                        </div>
+                        <div
+                            className="flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full text-emerald-700 font-bold text-sm">
+                            <Award className="w-4 h-4"/>
+                            <span>Score: {evaluation.score}/100</span>
+                        </div>
+                    </div>
+
+                    <div className="text-sm text-slate-700">
+                        <span className="font-semibold block text-xs text-slate-500 uppercase mb-0.5">Feedback</span>
+                        <p>{evaluation.feedback}</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                        <div
+                            className="bg-emerald-50/60 p-3 rounded-lg border border-emerald-100 text-xs text-emerald-800">
+                            <span className="font-bold block mb-1">Strengths:</span>
+                            <p>{evaluation.strengths || 'N/A'}</p>
+                        </div>
+                        <div className="bg-amber-50/60 p-3 rounded-lg border border-amber-100 text-xs text-amber-800">
+                            <span className="font-bold block mb-1">Areas for Improvement:</span>
+                            <p>{evaluation.improvements || 'N/A'}</p>
+                        </div>
+                    </div>
+
+                    <div className="pt-2 flex justify-end">
+                        {currentIndex + 1 < questions.length ? (
+                            <button
+                                onClick={nextQuestion}
+                                className="bg-slate-900 hover:bg-black text-white font-medium px-4 py-2 rounded-lg text-sm transition flex items-center gap-1.5"
+                            >
+                                <span>Next Question</span>
+                                <ArrowRight className="w-4 h-4"/>
+                            </button>
+                        ) : (
+                            <button
+                                onClick={onViewReport}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-lg text-sm transition"
+                            >
+                                View Final Report
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ReportView({interview, onBack}) {
+    const [report, setReport] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchReport = async () => {
+            try {
+                const data = await api.getReport(interview.id);
+                setReport(data);
+            } catch (err) {
+                alert(err.message);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchReport();
+    }, [interview.id]);
+
+    if (loading) {
+        return (
+            <div className="flex justify-center items-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-600"/>
+            </div>
+        );
+    }
+
+    if (!report) {
+        return (
+            <div className="text-center p-8 bg-white rounded-xl border border-slate-200">
+                <p className="text-slate-500 text-sm">No report available yet. Please answer at least one question.</p>
+                <button onClick={onBack} className="mt-4 px-4 py-2 bg-indigo-600 text-white text-xs rounded-lg">Go
+                    Back
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="max-w-2xl mx-auto bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8 space-y-6">
+            <div className="flex justify-between items-start border-b border-slate-100 pb-4">
+                <div>
+                    <span
+                        className="text-xs uppercase font-bold tracking-wide text-indigo-600">Performance Summary</span>
+                    <h2 className="text-xl font-bold text-slate-900 mt-0.5">{interview.title}</h2>
+                </div>
+                <button
+                    onClick={onBack}
+                    className="text-xs font-medium text-slate-500 hover:text-slate-800"
+                >
+                    Back to Dashboard
+                </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4 text-center">
+                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                    <span className="text-xs text-slate-400 block font-medium">Total Questions</span>
+                    <span className="text-xl font-bold text-slate-800 mt-1">{report.totalQuestions}</span>
+                </div>
+                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                    <span className="text-xs text-slate-400 block font-medium">Answered</span>
+                    <span className="text-xl font-bold text-slate-800 mt-1">{report.answeredQuestions}</span>
+                </div>
+                <div className="bg-indigo-50 p-3.5 rounded-xl border border-indigo-100">
+                    <span className="text-xs text-indigo-600 block font-medium">Average Score</span>
+                    <span className="text-xl font-bold text-indigo-700 mt-1">{report.averageScore}%</span>
+                </div>
+            </div>
+
+            <div className="space-y-4 pt-2">
+                <div className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-100">
+                    <h4 className="text-xs uppercase font-bold text-emerald-800 mb-1">Key Strengths</h4>
+                    <p className="text-sm text-slate-700 leading-relaxed">{report.strengths || 'None recorded'}</p>
+                </div>
+
+                <div className="p-4 bg-amber-50/50 rounded-xl border border-amber-100">
+                    <h4 className="text-xs uppercase font-bold text-amber-800 mb-1">Areas for Growth</h4>
+                    <p className="text-sm text-slate-700 leading-relaxed">{report.improvements || 'None recorded'}</p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+===== FILE: C:\Users\Lenovo\Downloads\springboot project\Backend\Frontend\app\src\index.css =====
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    font-family: 'Inter', sans-serif;
+}
+
+===== FILE: C:\Users\Lenovo\Downloads\springboot project\Backend\Frontend\app\src\main.jsx =====
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+import './index.css';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+        <App/>
+    </React.StrictMode>
+);
+
+===== package.json =====
+{
+  "name": "interview-ai-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "lucide-react": "^0.344.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.2.0"
+  }
+}

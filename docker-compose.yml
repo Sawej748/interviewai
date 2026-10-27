@@ -1,0 +1,40 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: interviewai-db
+    restart: always
+    environment:
+      MYSQL_DATABASE: interviewai_db
+      MYSQL_ROOT_PASSWORD: "sql@123"
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-psql@123"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: interviewai-backend
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: "jdbc:mysql://db:3306/interviewai_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+      SPRING_DATASOURCE_USERNAME: "root"
+      SPRING_DATASOURCE_PASSWORD: "sql@123"
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: "com.mysql.cj.jdbc.Driver"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
+      RESEND_API_KEY: "re_test_key"
+      RESEND_FROM_EMAIL: "onboarding@resend.dev"
+      GEMINI_API_KEY: "${GEMINI_API_KEY}"
+volumes:
+  mysqldata:
