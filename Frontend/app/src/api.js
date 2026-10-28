@@ -1,6 +1,5 @@
 // Backend server ka Base API URL
-const BASE_URL = 'http://localhost:8080/api';
-
+baseURL: 'https://interviewai-s40n.onrender.com'
 /**
  * Universal Request Helper:
  * Automatically passes JWT token in headers and handles unauthorized redirects
